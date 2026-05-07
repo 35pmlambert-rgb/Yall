@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Hammer Bounce Brawler</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            background: #0a0a0a; 
+            color: white; 
+            font-family: 'Arial', sans-serif; 
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        #gameContainer {
+            position: relative;
+            width: 800px;
+            height: 600px;
+            background: #1a1a1a;
+            border: 3px solid #ffcc00;
+            box-shadow: 0 0 20px rgba(255, 204, 0, 0.3);
+        }
+        canvas { 
+            display: block; 
+            background: #222; 
+            width: 100%;
+            height: 100%;
+            cursor: crosshair;
+        }
+        #ui { 
+            position: absolute; 
+            top: 20px; 
+            left: 20px; 
+            pointer-events: none;
+            z-index: 10;
+        }
+        .stat { 
+            font-size: 18px; 
+            margin-bottom: 12px; 
+            color: #ffcc00;
+            text-shadow: 0 0 10px rgba(255, 204, 0, 0.5);
+            font-weight: bold;
+        }
+        #score { font-size: 24px; color: #00ff00; }
+        #multiplier { font-size: 16px; color: #ff6600; margin-top: 10px; }
+        
+        #topRight {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            pointer-events: none;
+            z-index: 10;
+            text-align: right;
+        }
+        
+        #health {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            pointer-events: none;
+            z-index: 10;
+            font-size: 18px;
+            color: #ff4444;
+            text-shadow: 0 0 10px rgba(255, 68, 68, 0.5);
+        }
+        
+        .health-bar {
+            width: 150px;
+            height: 20px;
+            background: #333;
+            border: 2px solid #ff4444;
+            margin-top: 5px;
+            overflow: hidden;
+        }
+        
+        .health-fill {
+            height: 100%;
+            background: linear-gradient(to right, #ff4444, #ffaa00);
+            transition: width 0.2s;
+        }
+
+        #gameOver {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.95);
+            padding: 40px;
+            border: 3px solid #ffcc00;
+            text-align: center;
+            z-index: 100;
+            display: none;
+            pointer-events: all;
+            border-radius: 10px;
+        }
+
+        #gameOver h1 {
+            font-size: 48px;
+            margin-bottom: 20px;
+            color: #ffcc00;
+        }
+
+        #gameOver .finalStats {
+            font-size: 24px;
+            margin: 15px 0;
+            color: #00ff00;
+        }
+
+        #gameOver button {
+            margin-top: 30px;
+            padding: 15px 40px;
+            font-size: 20px;
+            background: #ffcc00;
+            color: #000;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+            border-radius: 5px;
+            transition: all 0.3s;
+        }
+
+        #gameOver button:hover {
+            background: #ffff00;
+            transform: scale(1.1);
+        }
+
+        .wave-indicator {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 20px;
+            color: #ffcc00;
+            text-shadow: 0 0 10px rgba(255, 204, 0, 0.5);
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas"></canvas>
+        
+        <div id="ui">
+            <div class="stat">Level: <span id="lv">1</span></div>
+            <div class="stat">Kills: <span id="kills">0</span></div>
+            <div class="stat" id="score">Score: 0</div>
+            <div id="multiplier">Streak: x1.0</div>
+        </div>
+
+        <div class="wave-indicator">
+            Wave <span id="wave">1</span> - Enemies: <span id="enemyCount">5</span>
+        </div>
+
+        <div id="topRight">
+            <div class="stat">Combo: <span id="combo">0</span></div>
+        </div>
+
+        <div id="health">
+            Player Health
+            <div class="health-bar">
+                <div class="health-fill" id="healthFill" style="width: 100%;"></div>
+            </div>
+        </div>
+
+        <div id="gameOver">
+            <h1>GAME OVER</h1>
+            <div class="finalStats">Final Level: <span id="finalLevel">0</span></div>
+            <div class="finalStats">Total Kills: <span id="finalKills">0</span></div>
+            <div class="finalStats">Score: <span id="finalScore">0</span></div>
+            <button onclick="location.reload()">Play Again</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const lvDisplay = document.getElementById('lv');
+        const killsDisplay = document.getElementById('kills');
+        const scoreDisplay = document.getElementById('score');
+        const multiplierDisplay = document.getElementById('multiplier');
+        const comboDisplay = document.getElementById('combo');
+        const waveDisplay = document.getElementById('wave');
+        const enemyCountDisplay = document.getElementById('enemyCount');
+        const gameOverScreen = document.getElementById('gameOver');
+        const healthFill = document.getElementById('healthFill');
+
+        canvas.width = 800;
+        canvas.height = 600;
+
+        // Game State
+        let gameState = {
+            hammerLevel: 1,
+            kills: 0,
+            score: 0,
+            combo: 0,
+            comboTimer: 0,
+            wave: 1,
+            isGameOver: false,
+            playerHealth: 100,
+            maxHealth: 100
+        };
+
+        let particles = [];
+        let floatingTexts = [];
+
+        const player = {
+            x: 400, 
+            y: 300,
+            radius: 15,
+            vx: 0, 
+            vy: 0,
+            speed: 0.15,
+            friction: 0.98,
+            hammerAngle: 0,
+            invulnerable: 0
+        };
+
+        let enemies = [];
+
+        function spawnEnemy() {
+            let spawnX, spawnY;
+            const minDist = 150;
+            
+            // Spawn away from player
+            do {
+                spawnX = Math.random() * (canvas.width - 40) + 20;
+                spawnY = Math.random() * (canvas.height - 40) + 20;
+            } while (Math.hypot(spawnX - player.x, spawnY - player.y) < minDist);
+
+            enemies.push({
+                x: spawnX,
+                y: spawnY,
+                radius: 12 + Math.random() * 10,
+                hp: Math.ceil(1 + gameState.hammerLevel / 3),
+                maxHp: Math.ceil(1 + gameState.hammerLevel / 3),
+                vx: (Math.random() - 0.5) * 2,
+                vy: (Math.random() - 0.5) * 2,
+                speed: 0.5 + (gameState.wave * 0.1)
+            });
+        }
+
+        function spawnWave() {
+            const baseEnemies = 3 + gameState.wave;
+            for(let i = 0; i < baseEnemies; i++) {
+                spawnEnemy();
+            }
+            updateEnemyCount();
+        }
+
+        // Initial enemies
+        spawnWave();
+
+        let mouse = { x: 400, y: 300 };
+        window.addEventListener('mousemove', e => {
+            const rect = canvas.getBoundingClientRect();
+            mouse.x = e.clientX - rect.left;
+            mouse.y = e.clientY - rect.top;
+        });
+
+        function createExplosion(x, y, color, size = 10) {
+            for(let i = 0; i < size; i++) {
+                particles.push({
+                    x, y, 
+                    vx: (Math.random() - 0.5) * 12, 
+                    vy: (Math.random() - 0.5) * 12, 
+                    life: 30, 
+                    color,
+                    size: Math.random() * 4 + 2
+                });
+            }
+        }
+
+        function createFloatingText(x, y, text, color) {
+            floatingTexts.push({
+                x, y,
+                text,
+                color,
+                life: 40,
+                vy: -2
+            });
+        }
+
+        function addScore(amount) {
+            gameState.score += amount;
+            scoreDisplay.innerText = 'Score: ' + gameState.score;
+        }
+
+        function updateCombo() {
+            gameState.comboTimer = 60; // Reset combo timer
+            gameState.combo++;
+            comboDisplay.innerText = gameState.combo;
+            multiplierDisplay.innerText = `Streak: x${(1 + gameState.combo * 0.1).toFixed(1)}`;
+        }
+
+        function damagePlayer(amount) {
+            if (player.invulnerable > 0) return;
+            
+            gameState.playerHealth -= amount;
+            player.invulnerable = 30;
+            
+            // Update health bar
+            healthFill.style.width = (gameState.playerHealth / gameState.maxHealth * 100) + '%';
+            
+            createExplosion(player.x, player.y, '#ff6666', 15);
+            createFloatingText(player.x, player.y, '-' + amount, '#ff6666');
+            
+            if (gameState.playerHealth <= 0) {
+                endGame();
+            }
+        }
+
+        function endGame() {
+            gameState.isGameOver = true;
+            document.getElementById('finalLevel').innerText = gameState.hammerLevel;
+            document.getElementById('finalKills').innerText = gameState.kills;
+            document.getElementById('finalScore').innerText = gameState.score;
+            gameOverScreen.style.display = 'block';
+        }
+
+        function updateEnemyCount() {
+            enemyCountDisplay.innerText = enemies.length;
+        }
+
+        function update() {
+            if (gameState.isGameOver) return;
+
+            // Movement physics: Pull toward mouse
+            let dx = mouse.x - player.x;
+            let dy = mouse.y - player.y;
+            player.vx += dx * player.speed;
+            player.vy += dy * player.speed;
+            
+            player.vx *= player.friction;
+            player.vy *= player.friction;
+            
+            player.x += player.vx;
+            player.y += player.vy;
+
+            // Invulnerability timer
+            if (player.invulnerable > 0) player.invulnerable--;
+
+            // Wall Bouncing
+            if (player.x < player.radius || player.x > canvas.width - player.radius) {
+                player.vx *= -1.2;
+                player.x = player.x < player.radius ? player.radius : canvas.width - player.radius;
+                createExplosion(player.x, player.y, '#aaa', 5);
+            }
+            if (player.y < player.radius || player.y > canvas.height - player.radius) {
+                player.vy *= -1.2;
+                player.y = player.y < player.radius ? player.radius : canvas.height - player.radius;
+                createExplosion(player.x, player.y, '#aaa', 5);
+            }
+
+            // Hammer Logic
+            player.hammerAngle += 0.2 + (gameState.hammerLevel * 0.02);
+            let hammerLen = 30 + (gameState.hammerLevel * 2);
+            let hx = player.x + Math.cos(player.hammerAngle) * hammerLen;
+            let hy = player.y + Math.sin(player.hammerAngle) * hammerLen;
+
+            // Enemy AI and collision
+            enemies.forEach((en, index) => {
+                // Enemy movement toward player
+                let edx = player.x - en.x;
+                let edy = player.y - en.y;
+                let edist = Math.hypot(edx, edy);
+                
+                if (edist > 0) {
+                    en.vx += (edx / edist) * en.speed * 0.1;
+                    en.vy += (edy / edist) * en.speed * 0.1;
+                }
+                
+                en.vx *= 0.95;
+                en.vy *= 0.95;
+                en.x += en.vx;
+                en.y += en.vy;
+
+                // Enemy boundary wrap
+                if (en.x < 0) en.x = canvas.width;
+                if (en.x > canvas.width) en.x = 0;
+                if (en.y < 0) en.y = canvas.height;
+                if (en.y > canvas.height) en.y = 0;
+
+                // Hammer collision
+                let dist = Math.hypot(hx - en.x, hy - en.y);
+                if (dist < en.radius + (gameState.hammerLevel * 1.5)) {
+                    en.hp--;
+                    
+                    if (en.hp <= 0) {
+                        createExplosion(en.x, en.y, '#ff8800', 15);
+                        enemies.splice(index, 1);
+                        
+                        const multiplier = 1 + gameState.combo * 0.1;
+                        const baseScore = 100;
+                        const earnedScore = Math.floor(baseScore * multiplier);
+                        
+                        gameState.kills++;
+                        addScore(earnedScore);
+                        updateCombo();
+                        gameState.hammerLevel++;
+                        
+                        killsDisplay.innerText = gameState.kills;
+                        lvDisplay.innerText = gameState.hammerLevel;
+                        
+                        createFloatingText(en.x, en.y, '+' + earnedScore, '#00ff00');
+                        
+                        updateEnemyCount();
+                        
+                        // Wave progression
+                        if (gameState.kills % 10 === 0) {
+                            gameState.wave++;
+                            waveDisplay.innerText = gameState.wave;
+                            spawnWave();
+                        } else if (enemies.length === 0) {
+                            spawnWave();
+                        }
+                    } else {
+                        createExplosion(en.x, en.y, '#ff4444', 5);
+                        createFloatingText(en.x, en.y, '-1 HP', '#ff4444');
+                    }
+                }
+
+                // Enemy collision with player
+                let pdist = Math.hypot(player.x - en.x, player.y - en.y);
+                if (pdist < player.radius + en.radius && player.invulnerable === 0) {
+                    damagePlayer(10);
+                }
+            });
+
+            // Combo timer decay
+            if (gameState.comboTimer > 0) {
+                gameState.comboTimer--;
+            } else if (gameState.combo > 0) {
+                gameState.combo = 0;
+                comboDisplay.innerText = '0';
+                multiplierDisplay.innerText = 'Streak: x1.0';
+            }
+
+            // Particle update
+            particles.forEach((p, i) => {
+                p.x += p.vx; 
+                p.y += p.vy;
+                p.vx *= 0.98;
+                p.vy *= 0.98;
+                p.life--;
+                if(p.life <= 0) particles.splice(i, 1);
+            });
+
+            // Floating text update
+            floatingTexts.forEach((t, i) => {
+                t.y += t.vy;
+                t.life--;
+                if(t.life <= 0) floatingTexts.splice(i, 1);
+            });
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw grid background
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 1;
+            for(let i = 0; i <= canvas.width; i += 50) {
+                ctx.beginPath();
+                ctx.moveTo(i, 0);
+                ctx.lineTo(i, canvas.height);
+                ctx.stroke();
+            }
+            for(let i = 0; i <= canvas.height; i += 50) {
+                ctx.beginPath();
+                ctx.moveTo(0, i);
+                ctx.lineTo(canvas.width, i);
+                ctx.stroke();
+            }
+
+            // Draw Particles
+            particles.forEach(p => {
+                ctx.fillStyle = p.color;
+                ctx.globalAlpha = p.life / 30;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.globalAlpha = 1;
+            });
+
+            // Draw Enemies
+            enemies.forEach(en => {
+                // Health bar above enemy
+                const hpPercent = en.hp / en.maxHp;
+                ctx.fillStyle = hpPercent > 0.5 ? '#00ff00' : hpPercent > 0.25 ? '#ffff00' : '#ff4444';
+                ctx.fillRect(en.x - en.radius, en.y - en.radius - 10, en.radius * 2, 4);
+                
+                // Enemy body
+                ctx.fillStyle = '#ff4444';
+                ctx.beginPath();
+                ctx.arc(en.x, en.y, en.radius, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Enemy outline
+                ctx.strokeStyle = '#ff8888';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            });
+
+            // Draw Hammer
+            let hammerLen = 30 + (gameState.hammerLevel * 2);
+            let hx = player.x + Math.cos(player.hammerAngle) * hammerLen;
+            let hy = player.y + Math.sin(player.hammerAngle) * hammerLen;
+            
+            ctx.strokeStyle = '#aaa';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(player.x, player.y);
+            ctx.lineTo(hx, hy);
+            ctx.stroke();
+
+            ctx.fillStyle = '#ffcc00';
+            ctx.save();
+            ctx.translate(hx, hy);
+            ctx.rotate(player.hammerAngle);
+            ctx.fillRect(-10, -15, 20 + gameState.hammerLevel, 30 + gameState.hammerLevel);
+            ctx.restore();
+
+            // Draw Player
+            ctx.fillStyle = player.invulnerable % 10 < 5 ? '#0095DD' : '#00DDFF';
+            ctx.beginPath();
+            ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.strokeStyle = '#00ffff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // Draw floating text
+            floatingTexts.forEach(t => {
+                ctx.fillStyle = t.color;
+                ctx.globalAlpha = t.life / 40;
+                ctx.font = 'bold 20px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(t.text, t.x, t.y);
+                ctx.globalAlpha = 1;
+            });
+
+            if (!gameState.isGameOver) {
+                requestAnimationFrame(() => {
+                    update();
+                    draw();
+                });
+            }
+        }
+
+        draw();
+    </script>
+</body>
+</html>
